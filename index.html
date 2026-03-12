@@ -56,10 +56,14 @@
         <h2 class="text-xl md:text-2xl font-bold mb-4 opacity-90">AI Smart Size Detector</h2>
         
         <!-- Mode Toggles -->
-        <div class="flex justify-center gap-4 mt-6">
+        <div class="flex flex-wrap justify-center gap-2 md:gap-4 mt-6">
             <button id="btn-manual" onclick="switchMode('manual')" class="px-6 py-2 rounded-full font-bold transition-all flex items-center gap-2 bg-transparent border-2 border-[#124d5b] opacity-70 hover:opacity-100">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3l-8.6 8.6c-.78.78-2.05.78-2.83 0l-7.17-7.17c-.78-.78-.78-2.05 0-2.83l8.6-8.6c.78-.78 2.05-.78 2.83 0l7.17 7.17c.78.78.78 2.05 0 2.83Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>
                 Input Manual
+            </button>
+            <button id="btn-tbbb" onclick="switchMode('tbbb')" class="px-6 py-2 rounded-full font-bold transition-all flex items-center gap-2 bg-transparent border-2 border-[#124d5b] opacity-70 hover:opacity-100">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                TB & BB
             </button>
             <button id="btn-camera" onclick="switchMode('camera')" class="px-6 py-2 rounded-full font-bold transition-all flex items-center gap-2 bg-[#124d5b] text-[#faebd7] shadow-lg scale-105">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg>
@@ -93,6 +97,25 @@
                         <input type="number" id="inp-C" oninput="handleManualInput()" placeholder="Contoh: 57" class="w-full p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50">
                     </div>
                 </div>
+            </div>
+
+            <!-- FORM ESTIMASI TB & BB -->
+            <div id="sec-tbbb" class="hidden">
+                <div class="flex items-center gap-2 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <h3 class="text-xl font-bold">Kalkulator TB & BB</h3>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Tinggi Badan (cm)</label>
+                        <input type="number" id="inp-tb-est" oninput="handleTBBBInput()" placeholder="Contoh: 170" class="w-full p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Berat Badan (kg)</label>
+                        <input type="number" id="inp-bb-est" oninput="handleTBBBInput()" placeholder="Contoh: 65" class="w-full p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50">
+                    </div>
+                </div>
+                <p class="text-xs mt-4 opacity-80 font-bold">*Metode ini menggunakan rumus estimasi proporsi rata-rata tubuh masyarakat. Sangat disarankan untuk memastikan lagi dengan mode AI Scan atau Manual.</p>
             </div>
 
             <!-- CAMERA SCANNER AUTOMATIC -->
@@ -136,7 +159,7 @@
                             <div class="laser-scan" id="laser"></div>
                             <div class="absolute bottom-4 w-full text-center">
                                 <span id="scan-status" class="bg-black/70 text-white px-4 py-2 rounded-full text-sm font-bold backdrop-blur-sm shadow-lg">
-                                    Berdiri mundur hingga tubuh terlihat
+                                    Berdiri tegak, diam, dan jangan blur
                                 </span>
                             </div>
                         </div>
@@ -192,7 +215,7 @@
     
     <div class="mt-8 text-sm opacity-70 font-bold mb-8 text-center">
         Dibuat khusus untuk Ozza - Arek Malang 🍎<br/>
-        <span class="text-xs opacity-70 font-normal">Diperbarui: PDH Fit Calibrated AI</span>
+        <span class="text-xs opacity-70 font-normal">Diperbarui: Full Body High Precision (Slow Scan) AI</span>
     </div>
 
     <!-- SCRIPT LOGIKA UTAMA -->
@@ -233,34 +256,64 @@
         // ==========================
         function switchMode(newMode) {
             mode = newMode;
-            const btnManual = document.getElementById('btn-manual');
-            const btnCamera = document.getElementById('btn-camera');
-            const secManual = document.getElementById('sec-manual');
-            const secCamera = document.getElementById('sec-camera');
+            const modes = ['manual', 'tbbb', 'camera'];
 
             const activeClasses = ['bg-[#124d5b]', 'text-[#faebd7]', 'shadow-lg', 'scale-105'];
             const inactiveClasses = ['bg-transparent', 'border-2', 'border-[#124d5b]', 'opacity-70'];
 
-            if(mode === 'manual') {
-                btnManual.classList.add(...activeClasses); btnManual.classList.remove(...inactiveClasses);
-                btnCamera.classList.add(...inactiveClasses); btnCamera.classList.remove(...activeClasses);
-                secManual.classList.remove('hidden'); secCamera.classList.add('hidden');
-                stopAIScan();
-            } else {
-                btnCamera.classList.add(...activeClasses); btnCamera.classList.remove(...inactiveClasses);
-                btnManual.classList.add(...inactiveClasses); btnManual.classList.remove(...activeClasses);
-                secCamera.classList.remove('hidden'); secManual.classList.add('hidden');
-                document.getElementById('setup-area').classList.remove('hidden');
-                document.getElementById('ai-area').classList.add('hidden');
-            }
+            modes.forEach(m => {
+                const btn = document.getElementById('btn-' + m);
+                const sec = document.getElementById('sec-' + m);
+                if (!btn || !sec) return;
+
+                if (m === mode) {
+                    btn.classList.add(...activeClasses); btn.classList.remove(...inactiveClasses);
+                    sec.classList.remove('hidden');
+                    if (m === 'camera') {
+                        document.getElementById('setup-area').classList.remove('hidden');
+                        document.getElementById('ai-area').classList.add('hidden');
+                    }
+                } else {
+                    btn.classList.add(...inactiveClasses); btn.classList.remove(...activeClasses);
+                    sec.classList.add('hidden');
+                }
+            });
+
+            if (mode !== 'camera') stopAIScan();
+            
             measurements = { A: 0, B: 0, C: 0 };
             updateUI();
+            calculateSize();
         }
 
+        function handleManualInput() {
         function handleManualInput() {
             measurements.A = parseFloat(document.getElementById('inp-A').value) || 0;
             measurements.B = parseFloat(document.getElementById('inp-B').value) || 0;
             measurements.C = parseFloat(document.getElementById('inp-C').value) || 0;
+            calculateSize();
+        }
+
+        function handleTBBBInput() {
+            const tb = parseFloat(document.getElementById('inp-tb-est').value);
+            const bb = parseFloat(document.getElementById('inp-bb-est').value);
+
+            if (!tb || !bb) {
+                measurements = { A: 0, B: 0, C: 0 };
+                calculateSize();
+                return;
+            }
+
+            // Rumus regresi linear sederhana untuk estimasi proporsi A, B, C dari TB & BB
+            const estA = 62 + (tb - 160) * 0.5;
+            const estB = 51 + (bb - 50) * 0.3;
+            const estC = 54 + (tb - 160) * 0.35;
+
+            measurements = {
+                A: Math.round(estA),
+                B: Math.round(estB),
+                C: Math.round(estC)
+            };
             calculateSize();
         }
 
@@ -269,7 +322,9 @@
 
             if (!A || !B || !C) {
                 resultName = null;
-                suggestion = mode === 'camera' ? 'Klik "Mulai Scan" untuk mendeteksi.' : 'Masukkan ketiga ukuran untuk melihat rekomendasi.';
+                if (mode === 'camera') suggestion = 'Klik "Mulai Scan" untuk mendeteksi.';
+                else if (mode === 'tbbb') suggestion = 'Masukkan Tinggi dan Berat Badan untuk melihat estimasi ukuran.';
+                else suggestion = 'Masukkan ketiga ukuran untuk melihat rekomendasi.';
                 updateUI();
                 return;
             }
@@ -285,7 +340,9 @@
 
             if (recommended) {
                 resultName = recommended.name;
-                if (A === recommended.A || B === recommended.B || C === recommended.C) {
+                if (mode === 'tbbb') {
+                    suggestion = `Estimasi cocok di ukuran ${resultName}. Tapi pastikan lagi ya, ini cuma tebakan rata-rata dari Berat dan Tinggi!`;
+                } else if (A === recommended.A || B === recommended.B || C === recommended.C) {
                     suggestion = 'Ukuran ini akan pas (fit). Jika suka yang agak longgar atau untuk layer baju, pertimbangkan naik 1 ukuran.';
                 } else {
                     suggestion = 'Ukuran ini adalah pilihan terbaik agar tidak kesempitan di bagian manapun.';
@@ -392,31 +449,41 @@
                 drawSkeleton(pose.keypoints);
                 processMeasurements(pose.keypoints);
             } else {
-                updateStatus("Tidak ada orang terdeteksi", false);
+                updateStatus("Orang tidak terdeteksi. Mundur sedikit.", false);
             }
 
             requestAnimationFrame(detectPoseLoop);
         }
 
         function drawSkeleton(keypoints) {
+            // Gambar SEMUA titik (Full Body Dots) untuk efek visual yang lebih presisi
             keypoints.forEach(pt => {
-                if (pt.score > 0.3) {
+                if (pt.score > 0.25) {
                     ctx.beginPath();
-                    ctx.arc(pt.x, pt.y, 5, 0, 2 * Math.PI);
+                    // Titik wajah dibuat sedikit lebih kecil dari badan
+                    const radius = (pt.name.includes('eye') || pt.name.includes('ear') || pt.name.includes('nose')) ? 3 : 5;
+                    ctx.arc(pt.x, pt.y, radius, 0, 2 * Math.PI);
                     ctx.fillStyle = "#10b981"; 
                     ctx.fill();
+                    
+                    // Tambahkan glow effect pada titik
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = "#10b981";
                 }
             });
+            ctx.shadowBlur = 0; // Reset shadow
 
+            // Hubungkan SEMUA titik
             const adjacentKeyPoints = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
             adjacentKeyPoints.forEach(([i, j]) => {
                 const kp1 = keypoints[i];
                 const kp2 = keypoints[j];
-                if (kp1.score > 0.3 && kp2.score > 0.3) {
+                if (kp1.score > 0.25 && kp2.score > 0.25) {
                     ctx.beginPath();
                     ctx.moveTo(kp1.x, kp1.y);
                     ctx.lineTo(kp2.x, kp2.y);
-                    ctx.lineWidth = 2;
+                    // Garis wajah lebih tipis
+                    ctx.lineWidth = (kp1.name.includes('eye') || kp1.name.includes('nose')) ? 1 : 2;
                     ctx.strokeStyle = "rgba(16, 185, 129, 0.7)";
                     ctx.stroke();
                 }
@@ -433,56 +500,52 @@
             const le = getPt('left_elbow');
             const lw = getPt('left_wrist');
 
-            // Syarat confidence point utama
+            // Syarat confidence point utama (Harus berdiri diam, kalau blur score akan turun < 0.4)
             const isConfident = (pt) => pt && pt.score > 0.4;
 
             if (isConfident(ls) && isConfident(rs) && isConfident(lh) && isConfident(rh)) {
-                updateStatus("Menghitung Proporsi...", true);
+                updateStatus("Menahan... Berdiri tegak & jangan gerak!", true);
                 
-                // --- PERBAIKAN MATEMATIKA ESTIMASI UNTUK PDH FIT ---
+                // --- MATEMATIKA ESTIMASI DIPERBAIKI (Lebih ketat & akurat) ---
                 const midShoulderY = (ls.y + rs.y) / 2;
                 const midHipY = (lh.y + rh.y) / 2;
                 
-                // Dapatkan dimensi dalam piksel
                 const torsoPx = Math.abs(midHipY - midShoulderY); 
                 const shoulderW_Px = Math.abs(ls.x - rs.x);
                 
                 const userHeightCm = parseFloat(document.getElementById('inp-height').value) || 170;
                 
-                // Fakta Biometrik Rata-Rata: 
-                // Torso (bahu ke pinggang) ~28% dari tinggi
-                // Jarak antar engsel tulang bahu ~24% dari tinggi
+                // Proporsi standar
                 const torsoCm = userHeightCm * 0.28; 
-                const shoulderCm = userHeightCm * 0.24;
+                const shoulderCm = userHeightCm * 0.22; // Diturunkan sedikit dari 0.24 agar lebih real
 
                 const pxPerCmTorso = torsoPx / torsoCm;
                 const pxPerCmShoulder = shoulderW_Px / shoulderCm;
                 
-                // Gunakan rata-rata kedua skala agar jika bahu kurang terlihat utuh, torso bisa menyeimbangkan
                 const pxPerCm = (pxPerCmTorso + pxPerCmShoulder) / 2;
 
-                // A. Panjang Baju (PDH harus turun melewati pinggang celana -> kalikan 1.55)
-                const estA = (torsoPx / pxPerCm) * 1.55;
+                // A. Panjang Baju (Pengali diturunkan dari 1.55 jadi 1.38 agar tidak terlalu panjang)
+                const estA = (torsoPx / pxPerCm) * 1.38;
 
-                // B. Lebar Dada (Lebar baju luar jauh lebih besar dibanding sendi tulang bahu -> kalikan 1.75)
-                const estB = (shoulderW_Px / pxPerCm) * 1.75; 
+                // B. Lebar Dada (Pengali diturunkan drastis dari 1.75 jadi 1.35. Jarak tulang ke lebar baju tidak sebesar itu)
+                const estB = (shoulderW_Px / pxPerCm) * 1.35; 
 
                 // C. Panjang Lengan 
                 let estC = 0;
                 if (isConfident(le) && isConfident(lw)) {
                     const arm1 = Math.hypot(ls.x - le.x, ls.y - le.y);
                     const arm2 = Math.hypot(le.x - lw.x, le.y - lw.y);
-                    // Lengan baju ditambah kelonggaran manset -> kalikan 1.25
-                    estC = ((arm1 + arm2) / pxPerCm) * 1.25; 
+                    // Lengan baju ditambah sedikit kelonggaran (1.15)
+                    estC = ((arm1 + arm2) / pxPerCm) * 1.15; 
                 } else {
-                    // Fallback lengan rata-rata
-                    estC = userHeightCm * 0.35; 
+                    estC = userHeightCm * 0.33; 
                 }
 
                 // Masukkan ke buffer
                 scanBuffer.push({ A: estA, B: estB, C: estC });
                 
-                scanProgress += 2; 
+                // PROGRES DILAMBATKAN: 0.8 per frame. Perlu ~120 frame stabil (3-4 detik)
+                scanProgress += 0.8; 
                 document.getElementById('scan-progress').style.width = `${scanProgress}%`;
 
                 if (scanProgress >= 100) {
@@ -490,8 +553,9 @@
                 }
 
             } else {
-                updateStatus("Mundur sedikit. Pastikan bahu & pinggang terlihat.", false);
-                scanProgress = Math.max(0, scanProgress - 1);
+                updateStatus("Gambar blur/bergerak. Tolong diam.", false);
+                // Mundurkan progres lumayan banyak jika bergerak agar data tidak tercemar
+                scanProgress = Math.max(0, scanProgress - 2);
                 document.getElementById('scan-progress').style.width = `${scanProgress}%`;
             }
         }
@@ -507,7 +571,7 @@
             document.getElementById('laser').classList.add('hidden'); 
             updateStatus("✨ SCAN BERHASIL! ✨", true);
 
-            // Hitung rata-rata hasil scan
+            // Hitung rata-rata hasil scan dari Ratusan Data (lebih presisi)
             let sumA = 0, sumB = 0, sumC = 0;
             scanBuffer.forEach(val => {
                 sumA += val.A; sumB += val.B; sumC += val.C;
