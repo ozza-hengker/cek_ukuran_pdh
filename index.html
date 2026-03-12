@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Ruler, Info, Shirt } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Ruler, Info, Shirt, Camera, ScanLine, RotateCcw, CheckCircle2, Hand } from 'lucide-react';
 
 const sizeChart = [
   { name: 'XS', A: 62, B: 51, C: 54 },
@@ -10,42 +10,54 @@ const sizeChart = [
   { name: 'XXL', A: 72, B: 63, C: 61 }
 ];
 
+// Tahapan untuk scanner kamera
+const SCAN_STEPS = [
+  { id: 'calib', label: 'Kalibrasi Skala', desc: 'Tarik garis pada sisi panjang KTP/KTM (Acuan 8.56 cm)', color: '#ef4444' }, // Red
+  { id: 'A', label: 'Panjang Baju (A)', desc: 'Tarik garis dari bahu atas ke pinggang', color: '#3b82f6' }, // Blue
+  { id: 'B', label: 'Lebar Dada (B)', desc: 'Tarik garis mendatar di area dada', color: '#10b981' }, // Green
+  { id: 'C', label: 'Panjang Lengan (C)', desc: 'Tarik garis dari ujung bahu ke pergelangan tangan', color: '#f59e0b' } // Orange
+];
+
 export default function App() {
-  const [measurements, setMeasurements] = useState({
-    A: '',
-    B: '',
-    C: ''
-  });
+  const [mode, setMode] = useState('manual'); // 'manual' | 'camera'
+  const [measurements, setMeasurements] = useState({ A: '', B: '', C: '' });
   const [result, setResult] = useState(null);
   const [suggestion, setSuggestion] = useState('');
 
+  // Camera & Canvas States
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [stream, setStream] = useState(null);
+  const [photoTaken, setPhotoTaken] = useState(false);
+  const [imageObj, setImageObj] = useState(null);
+  const [currentStep, setCurrentStep] = useState(0);
+  
+  // Storing drawn lines { start: {x, y}, end: {x, y}, lengthPx: number }
+  const [lines, setLines] = useState({ calib: null, A: null, B: null, C: null });
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [tempLine, setTempLine] = useState(null);
+
+  // --- MANUAL MODE LOGIC ---
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    // Hanya izinkan angka
-    if (value === '' || /^\d+$/.test(value)) {
-      setMeasurements({ ...measurements, [name]: value });
+    if (value === '' || /^\d+(\.\d+)?$/.test(value)) {
+      setMeasurements(prev => ({ ...prev, [name]: value }));
     }
   };
 
-  useEffect(() => {
-    calculateSize();
-  }, [measurements]);
-
-  const calculateSize = () => {
+  const calculateSize = useCallback(() => {
     const { A, B, C } = measurements;
-    const valA = parseInt(A);
-    const valB = parseInt(B);
-    const valC = parseInt(C);
+    const valA = parseFloat(A);
+    const valB = parseFloat(B);
+    const valC = parseFloat(C);
 
     if (!valA || !valB || !valC) {
       setResult(null);
-      setSuggestion('Masukkan ketiga ukuran untuk melihat rekomendasi.');
+      setSuggestion(mode === 'camera' ? 'Selesaikan semua tahapan scan garis.' : 'Masukkan ketiga ukuran untuk melihat rekomendasi.');
       return;
     }
 
     let recommended = null;
-
-    // Cari ukuran terkecil yang bisa memuat semua dimensi user
     for (const size of sizeChart) {
       if (valA <= size.A && valB <= size.B && valC <= size.C) {
         recommended = size;
@@ -55,8 +67,6 @@ export default function App() {
 
     if (recommended) {
       setResult(recommended.name);
-      
-      // Cek apakah ukurannya sangat pas (ngepas)
       if (valA === recommended.A || valB === recommended.B || valC === recommended.C) {
          setSuggestion('Ukuran ini akan pas di badan (fit). Jika suka yang lebih longgar, pertimbangkan naik 1 ukuran.');
       } else {
@@ -64,134 +74,393 @@ export default function App() {
       }
     } else {
       setResult('OVER SIZE');
-      setSuggestion('Maaf, ukuran kamu melebihi batas maksimal tabel (XXL). Mungkin perlu ukuran custom.');
+      setSuggestion('Maaf, ukuran kamu melebihi batas maksimal tabel (XXL).');
+    }
+  }, [measurements, mode]);
+
+  useEffect(() => {
+    calculateSize();
+  }, [measurements, calculateSize]);
+
+  // --- CAMERA SCANNER LOGIC ---
+  const startCamera = async () => {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } 
+      });
+      setStream(mediaStream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
+    } catch (err) {
+      alert("Gagal mengakses kamera. Pastikan izin kamera diberikan.");
+      console.error(err);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-[#faebd7] text-[#124d5b] p-6 font-sans flex flex-col items-center">
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+  };
+
+  // Switch modes
+  useEffect(() => {
+    if (mode === 'camera' && !photoTaken) {
+      startCamera();
+    } else {
+      stopCamera();
+    }
+    return () => stopCamera();
+  }, [mode, photoTaken]);
+
+  const takePhoto = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (video && canvas) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       
-      {/* Header Section */}
-      <div className="w-full max-w-2xl text-center mb-8 mt-4">
+      const img = new Image();
+      img.src = canvas.toDataURL('image/png');
+      img.onload = () => {
+        setImageObj(img);
+        setPhotoTaken(true);
+        setCurrentStep(0);
+        setLines({ calib: null, A: null, B: null, C: null });
+        setMeasurements({ A: '', B: '', C: '' });
+      };
+    }
+  };
+
+  const retakePhoto = () => {
+    setPhotoTaken(false);
+    setImageObj(null);
+    setLines({ calib: null, A: null, B: null, C: null });
+    setMeasurements({ A: '', B: '', C: '' });
+  };
+
+  // Drawing Logic
+  const getPointerPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    
+    // Scale coordinates to internal canvas resolution
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
+  };
+
+  const handlePointerDown = (e) => {
+    if (currentStep >= SCAN_STEPS.length) return;
+    setIsDrawing(true);
+    const pos = getPointerPos(e);
+    setTempLine({ start: pos, end: pos });
+  };
+
+  const handlePointerMove = (e) => {
+    if (!isDrawing) return;
+    // Prevent scrolling while drawing on mobile
+    if (e.touches) e.preventDefault(); 
+    const pos = getPointerPos(e);
+    setTempLine(prev => ({ ...prev, end: pos }));
+  };
+
+  const handlePointerUp = () => {
+    if (!isDrawing || !tempLine) return;
+    setIsDrawing(false);
+    
+    const dx = tempLine.end.x - tempLine.start.x;
+    const dy = tempLine.end.y - tempLine.start.y;
+    const lengthPx = Math.sqrt(dx * dx + dy * dy);
+    
+    // Ignore accidental clicks
+    if (lengthPx < 10) {
+      setTempLine(null);
+      return; 
+    }
+
+    const stepId = SCAN_STEPS[currentStep].id;
+    const newLines = { ...lines, [stepId]: { ...tempLine, lengthPx } };
+    setLines(newLines);
+    setTempLine(null);
+    
+    // Hitung ukuran jika kalibrasi sudah ada
+    if (newLines.calib) {
+      const pixelsPerCm = newLines.calib.lengthPx / 8.56; // 8.56cm is standard ID card width
+      const newMeasurements = { ...measurements };
+      
+      if (newLines.A) newMeasurements.A = Math.round(newLines.A.lengthPx / pixelsPerCm);
+      if (newLines.B) newMeasurements.B = Math.round(newLines.B.lengthPx / pixelsPerCm);
+      if (newLines.C) newMeasurements.C = Math.round(newLines.C.lengthPx / pixelsPerCm);
+      
+      setMeasurements(newMeasurements);
+    }
+    
+    setCurrentStep(prev => prev + 1);
+  };
+
+  // Render Canvas
+  useEffect(() => {
+    if (!photoTaken || !imageObj || !canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    
+    // Draw base image
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(imageObj, 0, 0);
+    
+    // Helper to draw lines
+    const drawLine = (line, color, label, valCm) => {
+      ctx.beginPath();
+      ctx.moveTo(line.start.x, line.start.y);
+      ctx.lineTo(line.end.x, line.end.y);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      
+      // Draw endpoints
+      ctx.beginPath();
+      ctx.arc(line.start.x, line.start.y, 6, 0, 2 * Math.PI);
+      ctx.arc(line.end.x, line.end.y, 6, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+
+      // Draw Label
+      if (valCm !== undefined) {
+        const midX = (line.start.x + line.end.x) / 2;
+        const midY = (line.start.y + line.end.y) / 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(midX - 20, midY - 15, 60, 25);
+        ctx.fillStyle = 'white';
+        ctx.font = '16px sans-serif';
+        ctx.fillText(valCm ? `${valCm}cm` : label, midX - 15, midY + 3);
+      }
+    };
+
+    // Draw saved lines
+    SCAN_STEPS.forEach(step => {
+      if (lines[step.id]) {
+        let valCm = null;
+        if (step.id === 'calib') valCm = '8.5';
+        else if (measurements[step.id]) valCm = measurements[step.id];
+        drawLine(lines[step.id], step.color, step.id, valCm);
+      }
+    });
+
+    // Draw active drawing line
+    if (isDrawing && tempLine) {
+      const activeStep = SCAN_STEPS[currentStep];
+      drawLine(tempLine, activeStep ? activeStep.color : 'white', '');
+    }
+    
+  }, [photoTaken, imageObj, lines, isDrawing, tempLine, currentStep, measurements]);
+
+  return (
+    <div className="min-h-screen bg-[#faebd7] text-[#124d5b] p-4 md:p-6 font-sans flex flex-col items-center">
+      
+      {/* Header */}
+      <div className="w-full max-w-3xl text-center mb-6 mt-2">
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-widest uppercase mb-2">
           SGE 2026 Exclusive Wear
         </h1>
         <h2 className="text-xl md:text-2xl font-bold mb-4 opacity-90">
-          Kalkulator Ukuran PDH
+          Smart Size Detector
         </h2>
-        <p className="text-sm md:text-base mb-2">
-          Halo <strong>Ozza</strong>! Yuk masukkan ukuran baju yang biasa pas di kamu (dalam centimeter) untuk mencari ukuran PDH SGE 2026 yang paling cocok.
-        </p>
+        
+        {/* Mode Toggles */}
+        <div className="flex justify-center gap-4 mt-6">
+          <button 
+            onClick={() => setMode('manual')}
+            className={`px-6 py-2 rounded-full font-bold transition-all flex items-center gap-2 ${mode === 'manual' ? 'bg-[#124d5b] text-[#faebd7] shadow-lg scale-105' : 'bg-transparent border-2 border-[#124d5b] opacity-70 hover:opacity-100'}`}
+          >
+            <Ruler className="w-5 h-5" /> Input Manual
+          </button>
+          <button 
+            onClick={() => setMode('camera')}
+            className={`px-6 py-2 rounded-full font-bold transition-all flex items-center gap-2 ${mode === 'camera' ? 'bg-[#124d5b] text-[#faebd7] shadow-lg scale-105' : 'bg-transparent border-2 border-[#124d5b] opacity-70 hover:opacity-100'}`}
+          >
+            <ScanLine className="w-5 h-5" /> AR Scanner
+          </button>
+        </div>
       </div>
 
-      <div className="w-full max-w-4xl grid md:grid-cols-2 gap-6 items-start">
+      <div className="w-full max-w-5xl grid lg:grid-cols-2 gap-6 items-start">
         
-        {/* Left Column: Calculator Form */}
-        <div className="bg-[#f2e2cb] border-4 border-[#124d5b] p-6 rounded-lg shadow-lg relative">
-          <div className="flex items-center gap-2 mb-4">
-            <Ruler className="w-6 h-6" />
-            <h3 className="text-xl font-bold">Masukkan Ukuran (cm)</h3>
-          </div>
+        {/* LEFT COLUMN: Input or Camera Area */}
+        <div className="bg-[#f2e2cb] border-4 border-[#124d5b] p-4 md:p-6 rounded-lg shadow-lg relative overflow-hidden">
+          
+          {mode === 'manual' ? (
+            // MANUAL FORM
+            <div className="animate-in fade-in">
+              <div className="flex items-center gap-2 mb-4">
+                <Ruler className="w-6 h-6" />
+                <h3 className="text-xl font-bold">Masukkan Ukuran (cm)</h3>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold mb-1">A - Panjang Baju</label>
+                  <input type="number" name="A" value={measurements.A} onChange={handleInputChange} placeholder="Contoh: 65" className="w-full p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-1">B - Lebar Dada/Badan</label>
+                  <input type="number" name="B" value={measurements.B} onChange={handleInputChange} placeholder="Contoh: 54" className="w-full p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-1">C - Panjang Lengan</label>
+                  <input type="number" name="C" value={measurements.C} onChange={handleInputChange} placeholder="Contoh: 57" className="w-full p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            // CAMERA SCANNER UI
+            <div className="animate-in fade-in flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Camera className="w-6 h-6" />
+                  <h3 className="text-xl font-bold">AR Scanner</h3>
+                </div>
+                {photoTaken && (
+                  <button onClick={retakePhoto} className="flex items-center gap-1 text-sm font-bold bg-white px-3 py-1 rounded border-2 border-[#124d5b] hover:bg-[#124d5b] hover:text-white transition-colors">
+                    <RotateCcw className="w-4 h-4" /> Ulangi
+                  </button>
+                )}
+              </div>
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-bold mb-1">A - Panjang Baju</label>
-              <input
-                type="number"
-                name="A"
-                value={measurements.A}
-                onChange={handleInputChange}
-                placeholder="Contoh: 65"
-                className="w-full p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-bold mb-1">B - Lebar Dada/Badan</label>
-              <input
-                type="number"
-                name="B"
-                value={measurements.B}
-                onChange={handleInputChange}
-                placeholder="Contoh: 54"
-                className="w-full p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-bold mb-1">C - Panjang Lengan</label>
-              <input
-                type="number"
-                name="C"
-                value={measurements.C}
-                onChange={handleInputChange}
-                placeholder="Contoh: 57"
-                className="w-full p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50"
-              />
-            </div>
-          </div>
+              {/* Viewport Area */}
+              <div className="relative w-full aspect-[4/3] bg-black rounded overflow-hidden border-2 border-[#124d5b] shadow-inner touch-none">
+                {!photoTaken ? (
+                  <>
+                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                       {/* Overlay Guide */}
+                       <div className="border-2 border-dashed border-white/50 w-2/3 h-5/6 rounded-[40px] flex items-center justify-center">
+                          <p className="text-white/70 font-bold bg-black/30 px-4 py-2 rounded text-center backdrop-blur-sm">
+                            Posisikan badan di area ini<br/>Sambil pegang Kartu KTP/KTM
+                          </p>
+                       </div>
+                    </div>
+                    <button 
+                      onClick={takePhoto}
+                      className="absolute bottom-4 left-1/2 transform -translate-x-100 bg-[#ef4444] text-white p-4 rounded-full shadow-[0_0_15px_rgba(239,68,68,0.6)] hover:scale-110 transition-transform border-4 border-white"
+                    >
+                      <Camera className="w-6 h-6" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <canvas 
+                      ref={canvasRef} 
+                      className="w-full h-full object-contain cursor-crosshair"
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onPointerCancel={handlePointerUp}
+                      onPointerLeave={handlePointerUp}
+                    />
+                  </>
+                )}
+              </div>
 
-          {/* Result Banner */}
-          <div className={`mt-6 p-4 rounded-md border-2 ${result ? 'bg-[#124d5b] text-[#faebd7] border-[#124d5b]' : 'bg-transparent border-dashed border-[#124d5b]'}`}>
-            <div className="text-center">
-              <p className="text-sm uppercase font-bold tracking-widest mb-1">Rekomendasi Ukuran</p>
-              <p className="text-4xl font-black mb-2">{result || '?'}</p>
-              <p className="text-sm px-2 flex items-start justify-center gap-2">
-                <Info className="w-4 h-4 mt-0.5 shrink-0" />
-                <span>{suggestion}</span>
-              </p>
+              {/* Instructions Panel */}
+              {photoTaken && (
+                <div className="mt-4 p-3 bg-white rounded border border-[#124d5b]/30">
+                  <h4 className="font-bold text-sm mb-2 flex items-center gap-2">
+                    <Hand className="w-4 h-4" /> Instruksi Pengukuran (Tarik Garis)
+                  </h4>
+                  <ul className="space-y-2">
+                    {SCAN_STEPS.map((step, idx) => {
+                      const isDone = currentStep > idx;
+                      const isActive = currentStep === idx;
+                      return (
+                        <li key={step.id} className={`flex items-center gap-2 text-sm p-2 rounded transition-colors ${isActive ? 'bg-[#124d5b]/10 border border-[#124d5b]/30 font-bold' : isDone ? 'opacity-50' : 'opacity-30'}`}>
+                          {isDone ? <CheckCircle2 className="w-5 h-5 text-green-600" /> : <div className="w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px]" style={{ borderColor: step.color }}>{idx + 1}</div>}
+                          <div className="flex-1">
+                            <span style={{ color: isActive ? step.color : 'inherit' }}>{step.label}</span>
+                            {isActive && <p className="text-xs font-normal text-black mt-0.5">{step.desc}</p>}
+                          </div>
+                          {measurements[step.id] && <span className="font-bold">{measurements[step.id]} cm</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {currentStep >= SCAN_STEPS.length && (
+                    <div className="mt-3 text-center text-sm font-bold text-green-700 bg-green-100 p-2 rounded">
+                      Scan Selesai! Lihat rekomendasi ukuranmu.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
 
-        {/* Right Column: Reference & Chart */}
-        <div className="bg-[#f2e2cb] border-4 border-[#124d5b] p-6 rounded-lg shadow-lg">
-          <div className="flex flex-col items-center justify-center mb-6">
-            <Shirt className="w-16 h-16 mb-2 opacity-80" />
-            <p className="text-center font-bold text-sm">
-              Ukur kemeja/jaket yang biasa nyaman dipakai, bukan mengukur badan langsung jika ingin hasil lebih akurat.
+        {/* RIGHT COLUMN: Result & Guideline */}
+        <div className="flex flex-col gap-6">
+          
+          {/* Result Banner */}
+          <div className={`p-6 rounded-lg border-4 shadow-lg flex flex-col items-center justify-center text-center transition-colors duration-500 ${result ? 'bg-[#124d5b] text-[#faebd7] border-[#124d5b]' : 'bg-[#f2e2cb] border-[#124d5b] border-dashed text-[#124d5b]'}`}>
+            <p className="text-sm uppercase font-bold tracking-widest mb-1">Rekomendasi Ukuran</p>
+            <p className="text-6xl font-black my-2">{result || '?'}</p>
+            <p className="text-sm px-4 flex items-start justify-center gap-2 mt-2">
+              <Info className="w-5 h-5 mt-0.5 shrink-0" />
+              <span className="leading-tight">{suggestion}</span>
             </p>
           </div>
 
-          <h3 className="text-center font-bold text-lg mb-4 tracking-widest uppercase">
-            Size Guideline
-          </h3>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-center border-collapse">
-              <thead>
-                <tr className="border-b-2 border-[#124d5b]">
-                  <th className="p-2 font-bold"></th>
-                  {sizeChart.map(s => (
-                    <th key={s.name} className="p-2 font-black text-lg">{s.name}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b border-[#124d5b]/30">
-                  <td className="p-2 font-bold text-left">A (Panjang)</td>
-                  {sizeChart.map(s => (
-                    <td key={s.name + 'A'} className="p-2">{s.A}</td>
-                  ))}
-                </tr>
-                <tr className="border-b border-[#124d5b]/30">
-                  <td className="p-2 font-bold text-left">B (Lebar)</td>
-                  {sizeChart.map(s => (
-                    <td key={s.name + 'B'} className="p-2">{s.B}</td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="p-2 font-bold text-left">C (P. Lengan)</td>
-                  {sizeChart.map(s => (
-                    <td key={s.name + 'C'} className="p-2">{s.C}</td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
+          {/* Size Chart Guideline */}
+          <div className="bg-[#f2e2cb] border-4 border-[#124d5b] p-6 rounded-lg shadow-lg">
+            <h3 className="text-center font-bold text-lg mb-4 tracking-widest uppercase">
+              Size Guideline
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-center border-collapse">
+                <thead>
+                  <tr className="border-b-2 border-[#124d5b]">
+                    <th className="p-2 font-bold"></th>
+                    {sizeChart.map(s => (
+                      <th key={s.name} className="p-2 font-black text-lg">{s.name}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-[#124d5b]/30">
+                    <td className="p-2 font-bold text-left text-sm">A (Panjang)</td>
+                    {sizeChart.map(s => (
+                      <td key={s.name + 'A'} className={`p-2 transition-colors ${result === s.name ? 'bg-white/50 font-bold' : ''}`}>{s.A}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-[#124d5b]/30">
+                    <td className="p-2 font-bold text-left text-sm">B (Lebar)</td>
+                    {sizeChart.map(s => (
+                      <td key={s.name + 'B'} className={`p-2 transition-colors ${result === s.name ? 'bg-white/50 font-bold' : ''}`}>{s.B}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-bold text-left text-sm">C (Lengan)</td>
+                    {sizeChart.map(s => (
+                      <td key={s.name + 'C'} className={`p-2 transition-colors ${result === s.name ? 'bg-white/50 font-bold' : ''}`}>{s.C}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-          
+
         </div>
       </div>
       
-      <div className="mt-8 text-sm opacity-70 font-bold">
+      <div className="mt-8 text-sm opacity-70 font-bold mb-8">
         Dibuat khusus untuk Ozza - Arek Malang 🍎
       </div>
 
