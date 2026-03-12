@@ -102,12 +102,13 @@
                 <div id="setup-area" class="mb-4">
                     <label class="block text-sm font-bold mb-1">Berapa Tinggi Badanmu? (cm)</label>
                     <div class="flex gap-2">
-                        <input type="number" id="inp-height" placeholder="Contoh: 170" value="165" class="flex-1 p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50">
+                        <!-- Default diatur lebih realistis untuk rata-rata -->
+                        <input type="number" id="inp-height" placeholder="Contoh: 170" value="170" class="flex-1 p-3 bg-white border-2 border-[#124d5b] rounded text-[#124d5b] font-bold outline-none focus:ring-2 focus:ring-[#124d5b]/50">
                         <button onclick="startAIScan()" class="bg-[#124d5b] text-white px-6 py-2 rounded font-bold hover:bg-opacity-90 flex items-center gap-2">
                             Mulai Scan
                         </button>
                     </div>
-                    <p class="text-xs mt-2 opacity-80">*Tinggi badan diperlukan agar AI bisa mengukur skala tubuh aslimu lewat kamera.</p>
+                    <p class="text-xs mt-2 opacity-80">*Tinggi badan digunakan sebagai patokan skala (kalibrasi kedalaman) untuk mengukur tubuh aslimu.</p>
                 </div>
 
                 <!-- Area Kamera & AI -->
@@ -189,8 +190,9 @@
         </div>
     </div>
     
-    <div class="mt-8 text-sm opacity-70 font-bold mb-8">
-        Dibuat khusus untuk Ozza - Arek Malang 🍎 | Powered by AI
+    <div class="mt-8 text-sm opacity-70 font-bold mb-8 text-center">
+        Dibuat khusus untuk Ozza - Arek Malang 🍎<br/>
+        <span class="text-xs opacity-70 font-normal">Diperbarui: PDH Fit Calibrated AI</span>
     </div>
 
     <!-- SCRIPT LOGIKA UTAMA -->
@@ -204,7 +206,7 @@
             { name: 'XXL', A: 72, B: 63, C: 61 }
         ];
 
-        let mode = 'camera'; // Default ke Auto Scan
+        let mode = 'camera'; 
         let measurements = { A: 0, B: 0, C: 0 };
         let resultName = null;
         let suggestion = '';
@@ -213,8 +215,8 @@
         let detector;
         let stream;
         let isAIScanning = false;
-        let scanBuffer = []; // Untuk menstabilkan hasil pembacaan AI
-        let scanProgress = 0; // 0 sampai 100
+        let scanBuffer = []; 
+        let scanProgress = 0; 
         let isScanComplete = false;
         
         const video = document.getElementById('video');
@@ -223,7 +225,7 @@
 
         window.addEventListener('DOMContentLoaded', () => {
             renderTable();
-            switchMode('camera'); // Set awal
+            switchMode('camera'); 
         });
 
         // ==========================
@@ -284,13 +286,13 @@
             if (recommended) {
                 resultName = recommended.name;
                 if (A === recommended.A || B === recommended.B || C === recommended.C) {
-                    suggestion = 'Ukuran ini akan pas di badan (fit). Jika suka yang agak longgar, pertimbangkan naik 1 ukuran.';
+                    suggestion = 'Ukuran ini akan pas (fit). Jika suka yang agak longgar atau untuk layer baju, pertimbangkan naik 1 ukuran.';
                 } else {
                     suggestion = 'Ukuran ini adalah pilihan terbaik agar tidak kesempitan di bagian manapun.';
                 }
             } else {
                 resultName = 'CUSTOM';
-                suggestion = 'Maaf, ukuran kamu melebihi batas maksimal tabel standar. Pertimbangkan ukuran kustom.';
+                suggestion = 'Maaf, pengukuran melebih batas maksimal tabel standar (XXL).';
             }
             updateUI();
         }
@@ -343,9 +345,9 @@
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
 
-                // 2. Load Model TFJS MoveNet (Sangat Cepat di Browser)
+                // 2. Load Model TFJS MoveNet
                 if (!detector) {
-                    await tf.setBackend('webgl'); // Gunakan GPU jika tersedia
+                    await tf.setBackend('webgl'); 
                     const model = poseDetection.SupportedModels.MoveNet;
                     detector = await poseDetection.createDetector(model, {
                         modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
@@ -380,11 +382,9 @@
         async function detectPoseLoop() {
             if (!isAIScanning || isScanComplete) return;
 
-            // Gambar video feed ke canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // Deteksi Tubuh
             const poses = await detector.estimatePoses(video);
             
             if (poses.length > 0) {
@@ -399,17 +399,15 @@
         }
 
         function drawSkeleton(keypoints) {
-            // Gambar titik (Sendi)
             keypoints.forEach(pt => {
                 if (pt.score > 0.3) {
                     ctx.beginPath();
                     ctx.arc(pt.x, pt.y, 5, 0, 2 * Math.PI);
-                    ctx.fillStyle = "#10b981"; // Hijau
+                    ctx.fillStyle = "#10b981"; 
                     ctx.fill();
                 }
             });
 
-            // Hubungkan titik (Garis Tubuh)
             const adjacentKeyPoints = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
             adjacentKeyPoints.forEach(([i, j]) => {
                 const kp1 = keypoints[i];
@@ -435,46 +433,55 @@
             const le = getPt('left_elbow');
             const lw = getPt('left_wrist');
 
-            // Cek apakah bahu dan pinggang terlihat jelas (Confidence > 40%)
+            // Syarat confidence point utama
             const isConfident = (pt) => pt && pt.score > 0.4;
 
             if (isConfident(ls) && isConfident(rs) && isConfident(lh) && isConfident(rh)) {
                 updateStatus("Menghitung Proporsi...", true);
                 
-                // --- MATEMATIKA ESTIMASI ---
+                // --- PERBAIKAN MATEMATIKA ESTIMASI UNTUK PDH FIT ---
                 const midShoulderY = (ls.y + rs.y) / 2;
                 const midHipY = (lh.y + rh.y) / 2;
-                const torsoPx = Math.abs(midHipY - midShoulderY); // Panjang batang tubuh di piksel
                 
-                const userHeightCm = parseFloat(document.getElementById('inp-height').value);
-                
-                // Fakta Biometrik: Jarak bahu ke pinggang rata-rata adalah ~28% dari tinggi badan
-                const torsoCm = userHeightCm * 0.28; 
-                const pxPerCm = torsoPx / torsoCm; // Menemukan skala Pixel ke CM saat ini
-
-                // A. Panjang Baju (PDH biasanya agak turun dari pinggang, kita kalikan 1.35)
-                const estA = (torsoPx / pxPerCm) * 1.35;
-
-                // B. Lebar Dada
+                // Dapatkan dimensi dalam piksel
+                const torsoPx = Math.abs(midHipY - midShoulderY); 
                 const shoulderW_Px = Math.abs(ls.x - rs.x);
-                // Bahu dalam (sendi) lebih sempit dari lebar baju, kita kalikan 1.4 untuk ease/kelonggaran
-                const estB = (shoulderW_Px / pxPerCm) * 1.4; 
+                
+                const userHeightCm = parseFloat(document.getElementById('inp-height').value) || 170;
+                
+                // Fakta Biometrik Rata-Rata: 
+                // Torso (bahu ke pinggang) ~28% dari tinggi
+                // Jarak antar engsel tulang bahu ~24% dari tinggi
+                const torsoCm = userHeightCm * 0.28; 
+                const shoulderCm = userHeightCm * 0.24;
 
-                // C. Panjang Lengan (Bahu ke siku + siku ke pergelangan)
+                const pxPerCmTorso = torsoPx / torsoCm;
+                const pxPerCmShoulder = shoulderW_Px / shoulderCm;
+                
+                // Gunakan rata-rata kedua skala agar jika bahu kurang terlihat utuh, torso bisa menyeimbangkan
+                const pxPerCm = (pxPerCmTorso + pxPerCmShoulder) / 2;
+
+                // A. Panjang Baju (PDH harus turun melewati pinggang celana -> kalikan 1.55)
+                const estA = (torsoPx / pxPerCm) * 1.55;
+
+                // B. Lebar Dada (Lebar baju luar jauh lebih besar dibanding sendi tulang bahu -> kalikan 1.75)
+                const estB = (shoulderW_Px / pxPerCm) * 1.75; 
+
+                // C. Panjang Lengan 
                 let estC = 0;
                 if (isConfident(le) && isConfident(lw)) {
                     const arm1 = Math.hypot(ls.x - le.x, ls.y - le.y);
                     const arm2 = Math.hypot(le.x - lw.x, le.y - lw.y);
-                    estC = ((arm1 + arm2) / pxPerCm) * 1.1; // Kalikan 1.1 untuk manset baju
+                    // Lengan baju ditambah kelonggaran manset -> kalikan 1.25
+                    estC = ((arm1 + arm2) / pxPerCm) * 1.25; 
                 } else {
-                    // Fallback jika tangan tidak terlihat: Lengan biasanya ~33% dari tinggi
-                    estC = userHeightCm * 0.33; 
+                    // Fallback lengan rata-rata
+                    estC = userHeightCm * 0.35; 
                 }
 
-                // Tambahkan ke buffer untuk diambil rata-ratanya (Mencegah lonjakan angka)
+                // Masukkan ke buffer
                 scanBuffer.push({ A: estA, B: estB, C: estC });
                 
-                // Tambah progress bar
                 scanProgress += 2; 
                 document.getElementById('scan-progress').style.width = `${scanProgress}%`;
 
@@ -484,7 +491,6 @@
 
             } else {
                 updateStatus("Mundur sedikit. Pastikan bahu & pinggang terlihat.", false);
-                // Reset sedikit progress jika banyak gerak
                 scanProgress = Math.max(0, scanProgress - 1);
                 document.getElementById('scan-progress').style.width = `${scanProgress}%`;
             }
@@ -498,10 +504,10 @@
 
         function finalizeScan() {
             isScanComplete = true;
-            document.getElementById('laser').classList.add('hidden'); // Matikan laser
+            document.getElementById('laser').classList.add('hidden'); 
             updateStatus("✨ SCAN BERHASIL! ✨", true);
 
-            // Hitung rata-rata dari semua frame yang ditangkap
+            // Hitung rata-rata hasil scan
             let sumA = 0, sumB = 0, sumC = 0;
             scanBuffer.forEach(val => {
                 sumA += val.A; sumB += val.B; sumC += val.C;
@@ -514,7 +520,6 @@
                 C: Math.round(sumC / count)
             };
 
-            // Hitung Ukuran
             calculateSize();
 
             // Efek Flash
@@ -524,7 +529,6 @@
             setTimeout(() => { flash.style.opacity = '0'; }, 50);
             setTimeout(() => { flash.remove(); }, 500);
         }
-
 
         // ==========================
         // TABEL RENDER
